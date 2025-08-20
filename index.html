@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Plataforma 2D Estilo Mario – Single File</title>
+  <meta charset="UTF-8" />
+  <title>Plataforma 2D Simplificada</title>
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; background: #5c94fc; }
     #score {
@@ -19,279 +19,163 @@
   <script type="module">
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js';
 
-    // ——————————————————————————————————————————————————————————————
-    // 1. SETUP BÁSICO: cena, câmera ortográfica e renderer WebGL
+    // 1. Cena, câmera e renderer
     const scene    = new THREE.Scene();
     const aspect   = window.innerWidth / window.innerHeight;
     const viewSize = 600;
-    const camera   = new THREE.OrthographicCamera(
-      -aspect * viewSize / 2, aspect * viewSize / 2,
-       viewSize / 2, -viewSize / 2,
+    const cam = new THREE.OrthographicCamera(
+      -aspect*viewSize/2, aspect*viewSize/2,
+       viewSize/2, -viewSize/2,
        0.1, 1000
     );
-    camera.position.z = 10;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    cam.position.z = 10;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     window.addEventListener('resize', () => {
       const a = window.innerWidth / window.innerHeight;
-      camera.left   = -a * viewSize / 2;
-      camera.right  =  a * viewSize / 2;
-      camera.top    =  viewSize / 2;
-      camera.bottom = -viewSize / 2;
-      camera.updateProjectionMatrix();
+      cam.left   = -a*viewSize/2; cam.right  = a*viewSize/2;
+      cam.top    =  viewSize/2;   cam.bottom = -viewSize/2;
+      cam.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // ——————————————————————————————————————————————————————————————
-    // 2. ÁUDIO: Web Audio API (“sons do Chrome”)
+    // 2. Áudio simples
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    function playTone(freq, duration = 0.1, type = 'square') {
+    function playTone(freq, dur=0.1) {
       const osc  = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.frequency.value = freq;
-      osc.type            = type;
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.type = 'square'; osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-      osc.start();
-      osc.stop(audioCtx.currentTime + duration);
+      osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
+    const SFX = { jump:440, coin:880, hit:220 };
 
-    const sounds = {
-      jump: { freq: 440, dur: 0.12 },
-      coin: { freq: 880, dur: 0.08 },
-      hit:  { freq: 220, dur: 0.2  }
-    };
-    function play(name) {
-      const s = sounds[name];
-      if (s) playTone(s.freq, s.dur);
-    }
-
-    // ——————————————————————————————————————————————————————————————
-    // 3. INPUT
+    // 3. Input
     const keys = {};
-    window.addEventListener('keydown', e => keys[e.code] = true);
-    window.addEventListener('keyup',   e => keys[e.code] = false);
+    window.addEventListener('keydown', e => keys[e.code]=true);
+    window.addEventListener('keyup',   e => keys[e.code]=false);
 
-    // ——————————————————————————————————————————————————————————————
-    // 4. CLASSE BASE PARA SPRITES ANIMADOS
-    class SpriteEntity {
-      constructor({ src, framesX, framesY, width, height, speed }) {
-        this.framesX = framesX;
-        this.framesY = framesY;
-        this.total   = framesX * framesY;
-        this.current = 0;
-        this.speed   = speed || 8;
-        this.acc     = 0;
-
-        const tex = new THREE.TextureLoader().load(src);
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(1/framesX, 1/framesY);
-
-        this.mat    = new THREE.SpriteMaterial({ map: tex, transparent: true });
-        this.sprite = new THREE.Sprite(this.mat);
-        this.sprite.scale.set(width, height, 1);
-        scene.add(this.sprite);
-      }
-
-      updateAnim(delta) {
-        this.acc += delta;
-        const interval = 1 / this.speed;
-        if (this.acc >= interval) {
-          this.current = (this.current + 1) % this.total;
-          const col = this.current % this.framesX;
-          const row = Math.floor(this.current / this.framesX);
-          this.mat.map.offset.set(
-            col / this.framesX,
-            1 - (row + 1) / this.framesY
-          );
-          this.acc -= interval;
-        }
-      }
+    // 4. Entidades geométricas
+    function createBox(w,h,color){
+      const mat = new THREE.MeshBasicMaterial({ color });
+      const geo = new THREE.BoxGeometry(w,h,1);
+      return new THREE.Mesh(geo, mat);
+    }
+    function createSphere(r,color){
+      const mat = new THREE.MeshBasicMaterial({ color });
+      const geo = new THREE.SphereGeometry(r,12,12);
+      return new THREE.Mesh(geo, mat);
     }
 
-    // ——————————————————————————————————————————————————————————————
-    // 5. PLAYER
-    class Player extends SpriteEntity {
-      constructor() {
-        super({
-          src:    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABGUlEQVR4nO3QMQEAAAwDINc/9F2gDhQF1phcCgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQI1FT3awAAABJRU5ErkJggg==',
-          framesX:4, framesY:4, width: 40, height: 60, speed: 10
-        });
-        this.pos       = new THREE.Vector3(0, -200, 0);
-        this.vel       = new THREE.Vector3(0, 0, 0);
-        this.speed     = 150;
-        this.gravity   = -600;
-        this.jumpForce = 350;
-        this.jumping   = false;
-      }
+    // Jogador
+    const player = createBox(40,60, 0xff0000);
+    player.position.set(0,-200,0);
+    scene.add(player);
+    let vel = new THREE.Vector2(0,0), jumping = false;
 
-      update(delta) {
-        // movimento horizontal
-        if (keys['ArrowLeft'])  this.vel.x = -this.speed;
-        else if (keys['ArrowRight']) this.vel.x =  this.speed;
-        else this.vel.x = 0;
-
-        // pulo
-        if (keys['Space'] && !this.jumping) {
-          this.vel.y = this.jumpForce;
-          this.jumping = true;
-          play('jump');
-        }
-
-        // gravidade
-        this.vel.y += this.gravity * delta;
-        this.pos.addScaledVector(this.vel, delta);
-
-        // piso
-        if (this.pos.y < -viewSize/2 + 30) {
-          this.pos.y = -viewSize/2 + 30;
-          this.vel.y = 0;
-          this.jumping = false;
-        }
-
-        this.sprite.position.copy(this.pos);
-        this.updateAnim(delta);
-      }
-    }
-
-    // ——————————————————————————————————————————————————————————————
-    // 6. INIMIGO
-    class Enemy extends SpriteEntity {
-      constructor(x, y, range) {
-        super({
-          src:    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABGUlEQVR4nO3QMQEAAAwDINc/9F2gDhQF1phcCgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQIFAgUCBQI1FT3awAAABJRU5ErkJggg==',
-          framesX:4, framesY:4, width: 40, height: 60, speed: 6
-        });
-        this.pos       = new THREE.Vector3(x, y, 0);
-        this.range     = range;
-        this.speed     = 80;
-        this.direction = 1;
-      }
-
-      update(delta) {
-        this.pos.x += this.direction * this.speed * delta;
-        if (this.pos.x > this.range[1] || this.pos.x < this.range[0]) {
-          this.direction *= -1;
-          this.sprite.scale.x *= -1;
-        }
-        this.sprite.position.copy(this.pos);
-        this.updateAnim(delta);
-      }
-    }
-
-    // ——————————————————————————————————————————————————————————————
-    // 7. MOEDA
-    class Coin extends SpriteEntity {
-      constructor(x, y) {
-        super({
-          src:    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAYAAAA7MK6iAAAAP0lEQVR4nO3MMQEAAAgCIP+9F2gHIhoe6mYGAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAPkQAQAAAAASUVORK5CYII=',
-          framesX:1, framesY:4, width: 30, height: 30, speed: 8
-        });
-        this.pos = new THREE.Vector3(x, y, 0);
-        this.sprite.position.copy(this.pos);
-      }
-
-      update(delta) {
-        this.updateAnim(delta);
-      }
-    }
-
-    // ——————————————————————————————————————————————————————————————
-    // 8. PLATAFORMAS
+    // Plataformas
     const platforms = [];
-    function createPlatform(x, y, w, h) {
-      const geo = new THREE.BoxGeometry(w, h, 10);
-      const mat = new THREE.MeshBasicMaterial({ color: 0x228822 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x + w/2, y - h/2, -5);
-      scene.add(mesh);
-      platforms.push(mesh);
+    function addPlat(x,y,w,h){
+      const p = createBox(w,h,0x228822);
+      p.position.set(x + w/2, y - h/2, 0);
+      scene.add(p); platforms.push(p);
     }
+    addPlat(-400, -viewSize/2 +30, 800,60);
+    addPlat(-100, -50,120,20);
+    addPlat(150,50,150,20);
+    addPlat(300,0,100,20);
 
-    // ——————————————————————————————————————————————————————————————
-    // 9. INSTÂNCIAS
-    const player = new Player();
-    const enemies = [
-      new Enemy(-100, -100, [-150, 150]),
-      new Enemy(200,    0,   [180, 300])
-    ];
-    const coins = [
-      new Coin(-50,  0),
-      new Coin(100,  50),
-      new Coin(250,  20)
-    ];
-
-    createPlatform(-400, -viewSize/2 + 30, 800, 60);
-    createPlatform(-100, -50,              120, 20);
-    createPlatform(150,   50,              150, 20);
-    createPlatform(300,    0,              100, 20);
-
-    let lastTime = performance.now();
-    let score    = 0;
-
-    // colisão AABB simplificada
-    function boxCollider(aPos, aSize, mesh) {
-      const mx = mesh.position.x - mesh.geometry.parameters.width/2;
-      const my = mesh.position.y + mesh.geometry.parameters.height/2;
-      return (
-        aPos.x + aSize.x/2  > mx &&
-        aPos.x - aSize.x/2  < mx + mesh.geometry.parameters.width &&
-        aPos.y - aSize.y/2  < my &&
-        aPos.y + aSize.y/2  > my - mesh.geometry.parameters.height
-      );
+    // Inimigos
+    const enemies = [];
+    function addEnemy(x,y,range){
+      const e = createBox(40,60,0x0000ff);
+      e.position.set(x,y,0);
+      e.userData = { range, dir:1 };
+      scene.add(e); enemies.push(e);
     }
+    addEnemy(-100,-100,[-150,150]);
+    addEnemy(200,0,[180,300]);
 
-    // ——————————————————————————————————————————————————————————————
-    // 10. LOOP PRINCIPAL
-    function loop() {
-      const now   = performance.now();
-      const delta = (now - lastTime) / 1000;
-      lastTime    = now;
+    // Moedas
+    const coins = [];
+    function addCoin(x,y){
+      const c = createSphere(15,0xffff00);
+      c.position.set(x,y,0);
+      scene.add(c); coins.push(c);
+    }
+    addCoin(-50,0); addCoin(100,50); addCoin(250,20);
 
-      player.update(delta);
+    // Física básica e loop
+    let last = performance.now(), score = 0;
+    function loop(){
+      const now = performance.now(), dt = (now-last)/1000;
+      last = now;
 
-      // colisão com plataformas
-      platforms.forEach(p => {
-        if (boxCollider(player.pos, new THREE.Vector2(40,60), p)
-            && player.vel.y <= 0) {
-          player.pos.y = p.position.y + p.geometry.parameters.height/2 + 60/2;
-          player.vel.y = 0;
-          player.jumping = false;
+      // Movimento do jogador
+      if (keys['ArrowLeft'])  vel.x = -150;
+      else if (keys['ArrowRight']) vel.x = 150;
+      else vel.x = 0;
+
+      if (keys['Space'] && !jumping){
+        vel.y = 350; jumping=true;
+        playTone(SFX.jump);
+      }
+
+      vel.y -= 600 * dt; // gravidade
+      player.position.x += vel.x * dt;
+      player.position.y += vel.y * dt;
+
+      // Colisão chão simples
+      if (player.position.y < -viewSize/2+30){
+        player.position.y = -viewSize/2+30;
+        vel.y = 0; jumping=false;
+      }
+
+      // Colisão com plataformas
+      platforms.forEach(p=>{
+        const dx = Math.abs(player.position.x - p.position.x);
+        const dy = player.position.y - (p.position.y + p.geometry.parameters.height/2);
+        if (dx < 20 + p.geometry.parameters.width/2 &&
+            dy < 0 && dy > -5 && vel.y < 0){
+          player.position.y = p.position.y + p.geometry.parameters.height/2 + 30;
+          vel.y = 0; jumping=false;
         }
       });
 
-      // inimigos
-      enemies.forEach(e => {
-        e.update(delta);
-        if (player.pos.distanceTo(e.pos) < 40) {
-          play('hit');
-          player.pos.set(0, -200, 0);
-          player.vel.set(0, 0, 0);
+      // Inimigos
+      enemies.forEach(e=>{
+        e.position.x += e.userData.dir * 80 * dt;
+        const [minX,maxX] = e.userData.range;
+        if (e.position.x < minX || e.position.x > maxX){
+          e.userData.dir *= -1;
+        }
+        // colisão simples
+        if (player.position.distanceTo(e.position) < 40){
+          playTone(SFX.hit,0.2);
+          player.position.set(0,-200,0);
+          vel.set(0,0); jumping = false;
         }
       });
 
-      // moedas
-      coins.forEach((c, i) => {
-        c.update(delta);
-        if (player.pos.distanceTo(c.pos) < 30) {
-          play('coin');
-          scene.remove(c.sprite);
-          coins.splice(i, 1);
+      // Moedas
+      coins.forEach((c,i)=>{
+        if (player.position.distanceTo(c.position) < 30){
+          playTone(SFX.coin,0.1);
+          scene.remove(c); coins.splice(i,1);
           score += 10;
-          document.getElementById('score').innerText = 'Score: ' + score;
+          document.getElementById('score').innerText = 'Score: '+score;
         }
       });
 
-      // câmera segue
-      camera.position.x = player.pos.x;
-      camera.position.y = player.pos.y;
-      camera.updateProjectionMatrix();
+      // Câmera segue
+      cam.position.x = player.position.x;
+      cam.position.y = player.position.y;
+      cam.updateProjectionMatrix();
 
-      renderer.render(scene, camera);
+      renderer.render(scene, cam);
       requestAnimationFrame(loop);
     }
 
